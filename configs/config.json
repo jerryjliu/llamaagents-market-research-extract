@@ -3,30 +3,91 @@
     "json_schema": {
       "type": "object",
       "properties": {
-        "document_type": {
-          "type": "string",
-          "description": "An overarching category for the type of document (e.g. invoice, purchase order, etc.)"
+        "report_title": {
+          "type": ["string", "null"],
+          "description": "The title of the market research report or presentation"
         },
-        "summary": {
-          "type": "string",
-          "description": "A 2-3 sentence summary describing the content of the document"
+        "executive_summary": {
+          "type": ["string", "null"],
+          "description": "A concise summary of the report's main conclusions and recommendations"
         },
-        "key_points": {
+        "key_findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "finding": {
+                "type": "string",
+                "description": "A key insight or conclusion from the research"
+              },
+              "supporting_data": {
+                "type": ["string", "null"],
+                "description": "Statistics, percentages, or data points that support this finding"
+              },
+              "source_visual": {
+                "type": ["string", "null"],
+                "description": "Description of any chart, graph, or diagram that illustrates this finding"
+              }
+            },
+            "required": ["finding"]
+          },
+          "description": "List of key findings and insights from the market research"
+        },
+        "market_size": {
+          "type": ["string", "null"],
+          "description": "Total addressable market size, value, or volume mentioned in the report"
+        },
+        "growth_rate": {
+          "type": ["string", "null"],
+          "description": "Market growth rate, CAGR, or growth projections"
+        },
+        "market_trends": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "A list of key points or insights from the document"
+          "description": "Key market trends identified in the research"
+        },
+        "competitive_insights": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "competitor": {
+                "type": ["string", "null"],
+                "description": "Name of the competitor or market player"
+              },
+              "insight": {
+                "type": "string",
+                "description": "Key insight about this competitor's position, strategy, or performance"
+              }
+            },
+            "required": ["insight"]
+          },
+          "description": "Competitive landscape insights and analysis"
+        },
+        "recommendations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Strategic recommendations or action items from the research"
+        },
+        "methodology": {
+          "type": ["string", "null"],
+          "description": "Research methodology, sample size, or data sources mentioned"
         }
       },
-      "required": ["document_type", "summary", "key_points"]
+      "required": ["report_title", "executive_summary", "key_findings", "market_size", "growth_rate", "market_trends", "competitive_insights", "recommendations", "methodology"]
     },
     "settings": {
-      "extraction_mode": "PREMIUM",
-      "system_prompt": null,
+      "extraction_mode": "MULTIMODAL",
+      "system_prompt": "You are analyzing a market research presentation. Pay close attention to charts, graphs, diagrams, and visual data representations. Extract quantitative data from visualizations and describe the visual context for key findings.",
       "citation_bbox": true,
-      "use_reasoning": false,
+      "use_reasoning": true,
       "cite_sources": true,
       "confidence_scores": true
     }
+  },
+  "parse": {
+    "tier": "agentic",
+    "version": "latest"
   },
   "split": {
     "categories": [],

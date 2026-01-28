@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # The name of the collection to use for storing extracted data.
 # When developing locally, this will use the _public collection (shared within the project),
 # otherwise agent data is isolated to each agent.
-EXTRACTED_DATA_COLLECTION: str = "extraction-review"
+EXTRACTED_DATA_COLLECTION: str = "market-research-findings"
 
 
 class ExtractSettings(BaseModel):
@@ -88,6 +88,13 @@ class ClassifyConfig(BaseModel):
 
     rules: list[ClassifyRule] = []
     settings: ClassifySettings = ClassifySettings()
+
+
+class ParseConfig(BaseModel):
+    """Parsing configuration for high-quality document understanding."""
+
+    tier: Literal["fast", "cost_effective", "agentic", "agentic_plus"] = "agentic"
+    version: str = "latest"
 
 
 class JsonSchema(BaseModel):

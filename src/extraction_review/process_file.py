@@ -16,7 +16,12 @@ from workflows.events import Event, StartEvent, StopEvent
 from workflows.resource import Resource, ResourceConfig
 
 from .clients import agent_name, get_llama_cloud_client, project_id
-from .config import EXTRACTED_DATA_COLLECTION, ExtractConfig, get_extraction_schema
+from .config import (
+    EXTRACTED_DATA_COLLECTION,
+    ExtractConfig,
+    ParseConfig,
+    get_extraction_schema,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +33,10 @@ class FileEvent(StartEvent):
 class Status(Event):
     level: Literal["info", "warning", "error"]
     message: str
+
+
+class ParseJobStartedEvent(Event):
+    pass
 
 
 class ExtractJobStartedEvent(Event):
@@ -49,16 +58,76 @@ class ExtractionState(BaseModel):
     file_path: str | None = None
     filename: str | None = None
     file_hash: str | None = None
+    parse_job_id: str | None = None
     extract_job_id: str | None = None
 
 
 class ProcessFileWorkflow(Workflow):
-    """Extract structured data from a document and save it for review."""
+    """Extract key findings from market research reports with visual understanding."""
+
+    @step()
+    async def start_parsing(
+        self,
+        event: FileEvent,
+        ctx: Context[ExtractionState],
+        llama_cloud_client: Annotated[
+            AsyncLlamaCloud, Resource(get_llama_cloud_client)
+        ],
+        parse_config: Annotated[
+            ParseConfig,
+            ResourceConfig(
+                config_file="configs/config.json",
+                path_selector="parse",
+                label="Parsing Settings",
+                description="High-quality parsing for visual content understanding",
+            ),
+        ],
+    ) -> ParseJobStartedEvent:
+        """Download document and start high-quality parsing for visual understanding."""
+        file_id = event.file_id
+        logger.info(f"Processing research report: {file_id}")
+
+        # Download file from cloud storage
+        files = await llama_cloud_client.files.query(filter=Filter(file_ids=[file_id]))
+        file_metadata = files.items[0]
+        file_url = await llama_cloud_client.files.get(file_id=file_id)
+
+        temp_dir = tempfile.gettempdir()
+        filename = file_metadata.name
+        file_path = os.path.join(temp_dir, filename)
+
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", file_url.url) as response:
+                with open(file_path, "wb") as f:
+                    async for chunk in response.aiter_bytes():
+                        f.write(chunk)
+
+        file_content = Path(file_path).read_bytes()
+
+        ctx.write_event_to_stream(
+            Status(level="info", message=f"Parsing visuals in {filename}")
+        )
+
+        # Start parsing with agentic tier for visual understanding
+        parse_job = await llama_cloud_client.parsing.create(
+            tier=parse_config.tier,
+            version=parse_config.version,
+            file_id=file_id,
+        )
+
+        async with ctx.store.edit_state() as state:
+            state.file_id = file_id
+            state.file_path = file_path
+            state.filename = filename
+            state.file_hash = hashlib.sha256(file_content).hexdigest()
+            state.parse_job_id = parse_job.id
+
+        return ParseJobStartedEvent()
 
     @step()
     async def start_extraction(
         self,
-        event: FileEvent,
+        event: ParseJobStartedEvent,
         ctx: Context[ExtractionState],
         llama_cloud_client: Annotated[
             AsyncLlamaCloud, Resource(get_llama_cloud_client)
@@ -69,66 +138,31 @@ class ProcessFileWorkflow(Workflow):
                 config_file="configs/config.json",
                 path_selector="extract",
                 label="Extraction Settings",
-                description="Configuration for document extraction quality and features",
+                description="Schema and settings for extracting market research findings",
             ),
         ],
     ) -> ExtractJobStartedEvent:
-        """Download document and start extraction job."""
-        file_id = event.file_id
-        logger.info(f"Running file {file_id}")
+        """Wait for parsing to complete, then start extraction of key findings."""
+        state = await ctx.store.get_state()
+        if state.parse_job_id is None:
+            raise ValueError("Parse job ID cannot be null")
 
-        # Download file from cloud storage
-        try:
-            files = await llama_cloud_client.files.query(
-                filter=Filter(file_ids=[file_id])
-            )
-            file_metadata = files.items[0]
-            file_url = await llama_cloud_client.files.get(file_id=file_id)
+        # Wait for parsing to complete
+        await llama_cloud_client.parsing.wait_for_completion(state.parse_job_id)
 
-            temp_dir = tempfile.gettempdir()
-            filename = file_metadata.name
-            file_path = os.path.join(temp_dir, filename)
-            client = httpx.AsyncClient()
-            # Report progress to the UI
-            logger.info(f"Downloading file {file_url.url} to {file_path}")
-
-            async with client.stream("GET", file_url.url) as response:
-                with open(file_path, "wb") as f:
-                    async for chunk in response.aiter_bytes():
-                        f.write(chunk)
-            logger.info(f"Downloaded file {file_url.url} to {file_path}")
-
-        except Exception as e:
-            logger.error(f"Error downloading file {file_id}: {e}", exc_info=True)
-            ctx.write_event_to_stream(
-                Status(
-                    level="error",
-                    message=f"Error downloading file {file_id}: {e}",
-                )
-            )
-            raise e
-
-        # Start extraction job
-        # track the content of the file, so as to be able to de-duplicate
-        file_content = Path(file_path).read_bytes()
-        logger.info(f"Extracting data from file {filename}")
         ctx.write_event_to_stream(
-            Status(level="info", message=f"Extracting data from file {filename}")
+            Status(level="info", message=f"Extracting findings from {state.filename}")
         )
 
+        # Start extraction with multimodal mode for visual understanding
         extract_job = await llama_cloud_client.extraction.run(
             config=extract_config.settings.model_dump(),
             data_schema=extract_config.json_schema,
-            file_id=file_id,
+            file_id=state.file_id,
             project_id=project_id,
         )
 
-        # Save state (mutation at end of step)
         async with ctx.store.edit_state() as state:
-            state.file_id = file_id
-            state.file_path = file_path
-            state.filename = filename
-            state.file_hash = hashlib.sha256(file_content).hexdigest()
             state.extract_job_id = extract_job.id
 
         return ExtractJobStartedEvent()
@@ -147,21 +181,19 @@ class ProcessFileWorkflow(Workflow):
                 config_file="configs/config.json",
                 path_selector="extract",
                 label="Extraction Settings",
-                description="Configuration for document extraction quality and features",
+                description="Schema and settings for extracting market research findings",
             ),
         ],
     ) -> StopEvent:
-        """Wait for extraction to complete, validate results, and save for review."""
+        """Validate extraction results and save key findings for review."""
         state = await ctx.store.get_state()
         if state.extract_job_id is None:
-            raise ValueError("Job ID cannot be null when waiting for its completion")
+            raise ValueError("Extract job ID cannot be null")
 
-        # Wait for extraction job to complete
         await llama_cloud_client.extraction.jobs.wait_for_completion(
             state.extract_job_id
         )
 
-        # Get extraction result
         extracted_result = await llama_cloud_client.extraction.jobs.get_result(
             state.extract_job_id
         )
@@ -169,13 +201,9 @@ class ProcessFileWorkflow(Workflow):
             run_id=extracted_result.run_id
         )
 
-        # Validate and parse extraction result
         extracted_event: ExtractedEvent | ExtractedInvalidEvent
         try:
-            logger.info(f"Extracted data: {extracted_result}")
-            # Create dynamic Pydantic model from JSON schema
             schema_class = get_extraction_schema(extract_config.json_schema)
-            # Use from_extraction_result for proper metadata extraction
             data = ExtractedData.from_extraction_result(
                 result=extract_run,
                 schema=schema_class,
@@ -185,54 +213,33 @@ class ProcessFileWorkflow(Workflow):
             )
             extracted_event = ExtractedEvent(data=data)
         except InvalidExtractionData as e:
-            logger.error(f"Error validating extracted data: {e}", exc_info=True)
+            logger.warning(f"Extraction validation issue: {e}")
             extracted_event = ExtractedInvalidEvent(data=e.invalid_item)
-        except Exception as e:
-            logger.error(
-                f"Error extracting data from file {state.filename}: {e}",
-                exc_info=True,
-            )
-            ctx.write_event_to_stream(
-                Status(
-                    level="error",
-                    message=f"Error extracting data from file {state.filename}: {e}",
-                )
-            )
-            raise e
 
-        # Stream the extracted event to client
         ctx.write_event_to_stream(extracted_event)
 
-        # Save extracted data for review
+        # Save extracted findings for review
         extracted_data = extracted_event.data
         data_dict = extracted_data.model_dump()
-        # remove past data when reprocessing the same file
+
+        # Remove past data when reprocessing the same file
         if extracted_data.file_hash is not None:
             await llama_cloud_client.beta.agent_data.delete_by_query(
                 deployment_name=agent_name or "_public",
                 collection=EXTRACTED_DATA_COLLECTION,
-                filter={
-                    "file_hash": {
-                        "eq": extracted_data.file_hash,
-                    },
-                },
+                filter={"file_hash": {"eq": extracted_data.file_hash}},
             )
-        logger.info(
-            f"Removing past data for file {extracted_data.file_name} with hash {extracted_data.file_hash}"
-        )
-        # finally, save the new data
+
         item = await llama_cloud_client.beta.agent_data.agent_data(
             data=data_dict,
             deployment_name=agent_name or "_public",
             collection=EXTRACTED_DATA_COLLECTION,
         )
-        logger.info(
-            f"Recorded extracted data for file {extracted_data.file_name or ''}"
-        )
+
         ctx.write_event_to_stream(
             Status(
                 level="info",
-                message=f"Recorded extracted data for file {extracted_data.file_name or ''}",
+                message=f"Key findings extracted from {extracted_data.file_name or ''}",
             )
         )
         return StopEvent(result=item.id)
