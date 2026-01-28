@@ -3,29 +3,82 @@
     "json_schema": {
       "type": "object",
       "properties": {
-        "document_type": {
-          "type": "string",
-          "description": "An overarching category for the type of document (e.g. invoice, purchase order, etc.)"
+        "report_title": {
+          "type": ["string", "null"],
+          "description": "The title of the market research report or presentation"
         },
-        "summary": {
-          "type": "string",
-          "description": "A 2-3 sentence summary describing the content of the document"
+        "executive_summary": {
+          "type": ["string", "null"],
+          "description": "A concise summary of the report's main conclusions and recommendations"
         },
-        "key_points": {
+        "key_findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "finding": {
+                "type": "string",
+                "description": "A specific insight or conclusion from the research"
+              },
+              "supporting_data": {
+                "type": ["string", "null"],
+                "description": "Statistics, metrics, or evidence supporting this finding"
+              },
+              "source_visual": {
+                "type": ["string", "null"],
+                "description": "Description of any chart, graph, or figure that illustrates this finding"
+              }
+            },
+            "required": ["finding", "supporting_data", "source_visual"]
+          },
+          "description": "List of key findings and insights from the research"
+        },
+        "market_metrics": {
+          "type": "object",
+          "properties": {
+            "market_size": {
+              "type": ["string", "null"],
+              "description": "Total market size or value mentioned"
+            },
+            "growth_rate": {
+              "type": ["string", "null"],
+              "description": "Market growth rate (CAGR or year-over-year)"
+            },
+            "forecast_period": {
+              "type": ["string", "null"],
+              "description": "Time period for forecasts or projections"
+            }
+          },
+          "required": ["market_size", "growth_rate", "forecast_period"],
+          "description": "Key market metrics and statistics"
+        },
+        "trends": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "A list of key points or insights from the document"
+          "description": "Major market trends identified in the report"
+        },
+        "recommendations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Strategic recommendations or action items from the report"
         }
       },
-      "required": ["document_type", "summary", "key_points"]
+      "required": ["report_title", "executive_summary", "key_findings", "market_metrics", "trends", "recommendations"]
     },
     "settings": {
-      "extraction_mode": "PREMIUM",
-      "system_prompt": null,
+      "extraction_mode": "MULTIMODAL",
+      "system_prompt": "Extract key findings from this market research report. Pay close attention to charts, graphs, and visual data presentations. Capture metrics, statistics, and insights from both text and visuals.",
       "citation_bbox": true,
       "use_reasoning": false,
       "cite_sources": true,
       "confidence_scores": true
+    }
+  },
+  "parse": {
+    "tier": "agentic",
+    "version": "latest",
+    "processing_options": {
+      "specialized_chart_parsing": "agentic"
     }
   },
   "split": {

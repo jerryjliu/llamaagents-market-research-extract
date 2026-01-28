@@ -14,7 +14,6 @@ Here are your editing permissions, which you **MUST ALWAYS** follow:
 """
 
 import json
-import warnings
 from pathlib import Path
 
 import pytest
@@ -43,19 +42,16 @@ def get_extraction_schema() -> dict:
 async def test_process_file_workflow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Test that market research reports are parsed and key findings extracted."""
     monkeypatch.setenv("LLAMA_CLOUD_API_KEY", "fake-api-key")
     # load a file to the mock LlamaCloud server and retrieve its file id (modify if you don't have any files to load as input)
     if fake is not None:
         file_id = fake.files.preload(path="tests/files/test.pdf")
     else:
-        warnings.warn(
+        pytest.skip(
             "Skipping test because it cannot be mocked. Set `FAKE_LLAMA_CLOUD=true` in your environment to enable this test..."
         )
-        return
-    try:
-        result = await process_file_workflow.run(start_event=FileEvent(file_id=file_id))
-    except Exception:
-        result = None
+    result = await process_file_workflow.run(start_event=FileEvent(file_id=file_id))
     assert result is not None
     # all generated agent data IDs are alphanumeric strings with 7 characters
     # the following assert statements ensure that that is the case
@@ -69,6 +65,7 @@ async def test_process_file_workflow(
 # <adapt>
 @pytest.mark.asyncio
 async def test_metadata_workflow() -> None:
+    """Test that metadata workflow returns the market research extraction schema."""
     result = await metadata_workflow.run(start_event=StartEvent())
     assert isinstance(result, MetadataResponse)
     assert result.extracted_data_collection == EXTRACTED_DATA_COLLECTION
